@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  jira-guru:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      # You'll need to replace this with your actual OpenAI API key
+      - RESPONSES_API_KEY=your_openai_api_key
+    volumes:
+      # Persist feedback data
+      - ./src/feedback:/app/src/feedback
+    restart: unless-stopped 
