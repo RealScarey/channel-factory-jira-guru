@@ -8,12 +8,36 @@ const fs = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Add an array to store recent application logs
+const appLogs = [];
+const MAX_LOGS = 100; // Maximum number of logs to keep in memory
+
+// Add a function to log messages with timestamps
+function logMessage(type, message, details = null) {
+  const logEntry = {
+    timestamp: new Date().toISOString(),
+    type,
+    message,
+    details
+  };
+  
+  // Add to in-memory logs
+  appLogs.unshift(logEntry);
+  if (appLogs.length > MAX_LOGS) {
+    appLogs.pop();
+  }
+  
+  // Also log to console
+  console.log(`${logEntry.timestamp} [${type}] ${message}`);
+  if (details) console.log(details);
+}
+
 // Configure OpenAI client
 const openai = new OpenAI({
   apiKey: process.env.RESPONSES_API_KEY
 });
 
-console.log("Starting Channel Factory JIRA Guru application with OpenAI integration...");
+logMessage('INFO', "Starting Channel Factory JIRA Guru application with OpenAI integration...");
 
 // Configure middleware
 app.use(express.json());
@@ -24,6 +48,34 @@ app.use(express.static(path.join(__dirname, 'public')));
 const feedbackDir = path.join(__dirname, 'feedback');
 if (!fs.existsSync(feedbackDir)) {
   fs.mkdirSync(feedbackDir, { recursive: true });
+  logMessage('INFO', "Created feedback directory", feedbackDir);
+}
+
+// Simple basic auth middleware for admin routes
+function basicAuth(req, res, next) {
+  // If a request comes from localhost in development, skip auth
+  if (process.env.NODE_ENV === 'development' && req.ip.includes('127.0.0.1')) {
+    return next();
+  }
+  
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader) {
+    res.setHeader('WWW-Authenticate', 'Basic realm="CF JIRA Guru Admin"');
+    return res.status(401).send('Authentication required');
+  }
+  
+  const auth = Buffer.from(authHeader.split(' ')[1], 'base64').toString().split(':');
+  const user = auth[0];
+  const pass = auth[1];
+  
+  // Simple hardcoded admin credentials - in a real app, use environment variables
+  if (user === 'admin' && pass === 'jiraguruadmin') {
+    next();
+  } else {
+    res.setHeader('WWW-Authenticate', 'Basic realm="CF JIRA Guru Admin"');
+    return res.status(401).send('Authentication failed');
+  }
 }
 
 // Routes
@@ -506,19 +558,259 @@ app.post('/api/log-feedback', async (req, res) => {
     const feedbackPath = path.join(feedbackDir, `${itemId}.json`);
     fs.writeFileSync(feedbackPath, JSON.stringify(feedbackLog, null, 2));
     
-    console.log(`Feedback logged: ${feedback} for item ${itemId} from ${userId || 'anonymous'}`);
+    logMessage('INFO', `Feedback logged: ${feedback} for item ${itemId} from ${userId || 'anonymous'}`);
     
     res.status(200).json({ success: true });
   } catch (error) {
-    console.error('Error logging feedback:', error);
+    logMessage('ERROR', 'Error logging feedback:', error);
     res.status(500).json({ success: false, error: 'Failed to log feedback' });
+  }
+});
+
+// Admin dashboard for logs
+app.get('/admin/logs', basicAuth, (req, res) => {
+  try {
+    // Get feedback logs
+    const feedbackLogs = [];
+    if (fs.existsSync(feedbackDir)) {
+      const feedbackFiles = fs.readdirSync(feedbackDir);
+      for (const file of feedbackFiles) {
+        try {
+          const filePath = path.join(feedbackDir, file);
+          const content = fs.readFileSync(filePath, 'utf8');
+          const feedbackData = JSON.parse(content);
+          feedbackLogs.push(feedbackData);
+        } catch (err) {
+          logMessage('ERROR', `Error reading feedback file ${file}:`, err);
+        }
+      }
+    }
+    
+    // Sort feedback logs by timestamp (newest first)
+    feedbackLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>CF JIRA Guru - Admin Dashboard</title>
+        <style>
+          body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #000000;
+            color: #ffffff;
+          }
+          .header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+          }
+          .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: #ff0000; /* Red accent */
+            margin-right: 15px;
+            padding: 10px;
+            border: 2px solid #ffffff; /* White border */
+            border-radius: 8px;
+          }
+          h1 {
+            color: #ff0000; /* Red accent */
+            margin: 0;
+          }
+          h2 {
+            color: #ffffff;
+            border-bottom: 2px solid #ff0000; /* Red accent */
+            padding-bottom: 8px;
+          }
+          .card {
+            border: 1px solid #ffffff; /* White border */
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 6px rgba(255,255,255,0.2);
+            background-color: #121212; /* Dark card background */
+          }
+          .btn {
+            background-color: #ff0000; /* Red accent */
+            color: white;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            font-weight: bold;
+            transition: background-color 0.3s;
+          }
+          .btn:hover {
+            background-color: #cc0000; /* Darker red on hover */
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+          }
+          th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #333333;
+          }
+          th {
+            background-color: #1a1a1a;
+            color: #ff0000; /* Red accent */
+          }
+          tr:hover {
+            background-color: #1a1a1a;
+          }
+          .log-entry {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-left: 3px solid #666666;
+            background-color: #1a1a1a;
+          }
+          .log-entry.error {
+            border-left-color: #ff0000;
+          }
+          .log-entry.info {
+            border-left-color: #0088ff;
+          }
+          .timestamp {
+            color: #999999;
+            font-size: 12px;
+          }
+          .tabs {
+            display: flex;
+            margin-bottom: 20px;
+          }
+          .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: 1px solid #ffffff;
+            background-color: #121212;
+            color: #ffffff;
+          }
+          .tab.active {
+            background-color: #ff0000;
+            color: #ffffff;
+            border-color: #ff0000;
+          }
+          .tab-content {
+            display: none;
+          }
+          .tab-content.active {
+            display: block;
+          }
+          .feedback-up {
+            color: #00cc00;
+          }
+          .feedback-down {
+            color: #ff0000;
+          }
+          .footer {
+            margin-top: 40px;
+            text-align: center;
+            color: #999999;
+            font-size: 14px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="logo">CF</div>
+          <h1>JIRA Guru Admin Dashboard</h1>
+        </div>
+        
+        <div class="tabs">
+          <div class="tab active" onclick="switchTab('feedback')">User Feedback</div>
+          <div class="tab" onclick="switchTab('system')">System Logs</div>
+        </div>
+        
+        <div id="feedback" class="tab-content active">
+          <div class="card">
+            <h2>User Feedback</h2>
+            ${feedbackLogs.length > 0 ? `
+              <table>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Question</th>
+                  <th>Feedback</th>
+                  <th>User</th>
+                </tr>
+                ${feedbackLogs.map(log => `
+                  <tr>
+                    <td>${new Date(log.timestamp).toLocaleString()}</td>
+                    <td>${log.question || 'N/A'}</td>
+                    <td class="${log.feedback === 'up' ? 'feedback-up' : log.feedback === 'down' ? 'feedback-down' : ''}">
+                      ${log.feedback === 'up' ? '👍 Positive' : log.feedback === 'down' ? '👎 Negative' : 'None'}
+                    </td>
+                    <td>${log.userId || 'anonymous'}</td>
+                  </tr>
+                `).join('')}
+              </table>
+            ` : `<p>No feedback logs available.</p>`}
+          </div>
+        </div>
+        
+        <div id="system" class="tab-content">
+          <div class="card">
+            <h2>Application Logs</h2>
+            <div class="log-entries">
+              ${appLogs.map(log => `
+                <div class="log-entry ${log.type.toLowerCase()}">
+                  <span class="timestamp">${new Date(log.timestamp).toLocaleString()}</span>
+                  <strong>[${log.type}]</strong> ${log.message}
+                  ${log.details ? `<pre>${typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : log.details}</pre>` : ''}
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+        
+        <div class="card">
+          <h2>Actions</h2>
+          <a href="/" class="btn">Back to App</a>
+        </div>
+        
+        <div class="footer">
+          © ${new Date().getFullYear()} Channel Factory | Powered by JIRA Guru
+        </div>
+        
+        <script>
+          function switchTab(tabName) {
+            // Hide all tab contents
+            document.querySelectorAll('.tab-content').forEach(tab => {
+              tab.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+              tab.classList.remove('active');
+            });
+            
+            // Show the selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Set the clicked tab as active
+            document.querySelector(`.tab[onclick="switchTab('${tabName}')"]`).classList.add('active');
+          }
+        </script>
+      </body>
+      </html>
+    `);
+  } catch (error) {
+    logMessage('ERROR', 'Error rendering admin dashboard:', error);
+    res.status(500).send('Error loading admin dashboard');
   }
 });
 
 // Function to get responses from OpenAI
 async function getResponseFromOpenAI(question) {
   try {
-    console.log("Connecting to OpenAI API...");
+    logMessage('INFO', "Connecting to OpenAI API...");
     
     // Create a system message that provides context about JIRA tickets and the expected response format
     const systemMessage = `
@@ -553,12 +845,12 @@ async function getResponseFromOpenAI(question) {
       max_tokens: 1500
     });
     
-    console.log("Received response from OpenAI");
+    logMessage('INFO', "Received response from OpenAI");
     
     // Return the HTML response
     return completion.choices[0].message.content;
   } catch (error) {
-    console.error('Error calling OpenAI API:', error);
+    logMessage('ERROR', 'Error calling OpenAI API:', error);
     
     // Implement a more robust fallback with detailed knowledge
     return createFallbackResponse(question);
@@ -719,5 +1011,5 @@ function createFallbackResponse(question) {
 
 // Start the server
 app.listen(PORT, () => {
-  console.log(`Channel Factory JIRA Guru app listening at http://localhost:${PORT}`);
+  logMessage('INFO', `Channel Factory JIRA Guru app listening at http://localhost:${PORT}`);
 }); 
