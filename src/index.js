@@ -78,8 +78,38 @@ function basicAuth(req, res, next) {
   }
 }
 
+// Authentication middleware for client-side auth
+function ensureAuthenticated(req, res, next) {
+  // In a real application, you'd verify a token or session
+  // For this example, we'll check for a custom header that the frontend will set
+  const isAuthenticated = req.get('X-Auth-Status') === 'authenticated';
+  
+  if (isAuthenticated) {
+    return next();
+  } else {
+    // For API requests, return 401
+    if (req.path.startsWith('/api/')) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    // For page requests, redirect to login
+    return res.redirect('/login');
+  }
+}
+
 // Routes
+
+// Root route - redirect to login
 app.get('/', (req, res) => {
+  res.redirect('/login');
+});
+
+// Login route - serve the login page
+app.get('/login', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Main app route - only accessible after login
+app.get('/app', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -166,6 +196,15 @@ app.get('/', (req, res) => {
           font-size: 14px;
         }
       </style>
+      <script>
+        // Check login status when the page loads
+        window.addEventListener('DOMContentLoaded', function() {
+          const isAuthenticated = sessionStorage.getItem('isAuthenticated');
+          if (!isAuthenticated) {
+            window.location.href = '/login';
+          }
+        });
+      </script>
     </head>
     <body>
       <div class="header">
@@ -251,14 +290,6 @@ app.post('/ask-question', async (req, res) => {
             box-shadow: 0 3px 6px rgba(255,255,255,0.2);
             background-color: #121212; /* Dark card background */
           }
-          .question {
-            font-style: italic;
-            margin-bottom: 20px;
-            padding: 15px;
-            background-color: #1a1a1a; /* Slightly lighter than card background */
-            border-left: 4px solid #ff0000; /* Red accent */
-            border-radius: 4px;
-          }
           .btn {
             background-color: #ff0000; /* Red accent */
             color: white;
@@ -270,31 +301,27 @@ app.post('/ask-question', async (req, res) => {
             display: inline-block;
             font-weight: bold;
             transition: background-color 0.3s;
+            margin-right: 10px;
           }
           .btn:hover {
             background-color: #cc0000; /* Darker red on hover */
           }
-          .analysis-content {
-            line-height: 1.6;
-          }
-          .analysis-content h3 {
-            margin-top: 20px;
-            color: #ff0000; /* Red accent */
-            font-weight: bold;
-          }
-          .analysis-content h4 {
-            color: #ffffff;
-            margin-top: 16px;
-          }
-          .analysis-content ul {
-            margin-left: 20px;
-          }
-          .ticket-reference {
+          .btn-neutral {
             background-color: #333333;
-            border-radius: 3px;
-            padding: 2px 5px;
-            font-family: monospace;
-            border: 1px solid #ffffff; /* White border */
+          }
+          .btn-neutral:hover {
+            background-color: #444444;
+          }
+          pre {
+            background-color: #333333;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+          }
+          .feedback-container {
+            display: flex;
+            margin-top: 20px;
           }
           .footer {
             margin-top: 40px;
@@ -302,56 +329,26 @@ app.post('/ask-question', async (req, res) => {
             color: #999999;
             font-size: 14px;
           }
-          /* Feedback styles */
-          .feedback-container {
-            display: flex;
-            align-items: center;
-            justify-content: flex-end;
-            margin-top: 20px;
-            gap: 8px;
-          }
-          .feedback-label {
-            font-size: 14px;
-            color: #999999;
-          }
-          .feedback-btn {
-            background: none;
-            border: 1px solid #ffffff;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.2s;
-          }
-          .feedback-btn[data-action="up"] {
-            color: #00cc00; /* Default green color for thumbs up */
-          }
-          .feedback-btn[data-action="down"] {
-            color: #ff0000; /* Default red color for thumbs down */
-          }
-          .feedback-btn:hover {
+          .question {
+            font-style: italic;
+            margin-bottom: 20px;
+            padding: 10px;
             background-color: #333333;
+            border-radius: 6px;
           }
-          .feedback-btn.active-up {
-            background-color: #004400;
-            color: #00ff00;
-            border-color: #00ff00;
-          }
-          .feedback-btn.active-down {
-            background-color: #440000;
-            color: #ff0000;
-            border-color: #ff0000;
-          }
-          .response-actions {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-top: 20px;
+          .script {
+            display: none;
           }
         </style>
+        <script>
+          // Check login status when the page loads
+          window.addEventListener('DOMContentLoaded', function() {
+            const isAuthenticated = sessionStorage.getItem('isAuthenticated');
+            if (!isAuthenticated) {
+              window.location.href = '/login';
+            }
+          });
+        </script>
       </head>
       <body>
         <div class="header">
@@ -364,24 +361,11 @@ app.post('/ask-question', async (req, res) => {
           <div class="question">${question}</div>
           
           <h2>Analysis</h2>
-          <div class="analysis-content">${analysis}</div>
+          <div id="analysis">${analysis}</div>
           
-          <div class="response-actions">
+          <div class="feedback-container">
             <a href="/" class="btn">Ask Another Question</a>
-            
-            <div class="feedback-container" id="feedback-${responseId}">
-              <span class="feedback-label">Was this helpful?</span>
-              <button class="feedback-btn" data-action="up" title="Yes, this was helpful">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M7 10v12"></path><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88Z"></path>
-                </svg>
-              </button>
-              <button class="feedback-btn" data-action="down" title="No, this wasn't helpful">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M17 14V2"></path><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22h0a3.13 3.13 0 0 1-3-3.88Z"></path>
-                </svg>
-              </button>
-            </div>
+            <a href="#" id="feedbackBtn" class="btn btn-neutral">Provide Feedback</a>
           </div>
         </div>
         
@@ -390,64 +374,38 @@ app.post('/ask-question', async (req, res) => {
         </div>
         
         <script>
-          // Feedback functionality
-          document.addEventListener('DOMContentLoaded', function() {
-            const feedbackContainer = document.getElementById('feedback-${responseId}');
-            let currentFeedback = null;
-            
-            if (!feedbackContainer) return;
-            
-            const buttons = feedbackContainer.querySelectorAll('.feedback-btn');
-            
-            buttons.forEach(button => {
-              button.addEventListener('click', async function() {
-                const action = this.getAttribute('data-action');
-                
-                // Toggle active state
-                if (currentFeedback === action) {
-                  // Remove active state
-                  currentFeedback = null;
-                  buttons.forEach(btn => {
-                    btn.classList.remove('active-up');
-                    btn.classList.remove('active-down');
-                  });
-                } else {
-                  // Set new active state
-                  currentFeedback = action;
-                  buttons.forEach(btn => {
-                    btn.classList.remove('active-up');
-                    btn.classList.remove('active-down');
-                  });
-                  this.classList.add('active-' + action);
-                }
-                
-                // Send feedback to server
-                try {
-                  await fetch('/api/log-feedback', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                      itemId: '${responseId}',
-                      userId: 'anonymous',
-                      feedback: currentFeedback,
-                      question: '${question.replace(/'/g, "\\'")}',
-                      timestamp: new Date().toISOString()
-                    })
-                  });
-                } catch (err) {
-                  console.error('Failed to submit feedback:', err);
-                }
+          document.getElementById('feedbackBtn').addEventListener('click', function(e) {
+            e.preventDefault();
+            const feedback = prompt('Please provide your feedback on this response:');
+            if (feedback) {
+              // Send feedback to server
+              fetch('/feedback', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  responseId: '${responseId}',
+                  question: '${question.replace(/'/g, "\\'")}',
+                  feedback: feedback
+                }),
+              })
+              .then(response => response.json())
+              .then(data => {
+                alert('Feedback submitted. Thank you!');
+              })
+              .catch((error) => {
+                console.error('Error submitting feedback:', error);
+                alert('Error submitting feedback. Please try again.');
               });
-            });
+            }
           });
         </script>
       </body>
       </html>
     `);
   } catch (error) {
-    console.error('Error analyzing question:', error);
+    logMessage('ERROR', "Error processing question", error);
     res.status(500).send(`
       <!DOCTYPE html>
       <html>
@@ -470,33 +428,26 @@ app.post('/ask-question', async (req, res) => {
           .logo {
             font-size: 24px;
             font-weight: bold;
-            color: #ff0000; /* Red accent */
+            color: #ff0000;
             margin-right: 15px;
             padding: 10px;
-            border: 2px solid #ffffff; /* White border */
+            border: 2px solid #ffffff;
             border-radius: 8px;
           }
           h1 {
-            color: #ff0000; /* Red accent */
+            color: #ff0000;
             margin: 0;
           }
           .card {
-            border: 1px solid #ffffff; /* White border */
+            border: 1px solid #ffffff;
             border-radius: 8px;
             padding: 20px;
             margin-bottom: 20px;
             box-shadow: 0 3px 6px rgba(255,255,255,0.2);
-            background-color: #121212; /* Dark card background */
-          }
-          .error-message {
-            background-color: #330000; /* Dark red background for error */
-            border-left: 4px solid #ff0000; /* Red accent */
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 4px;
+            background-color: #121212;
           }
           .btn {
-            background-color: #ff0000; /* Red accent */
+            background-color: #ff0000;
             color: white;
             padding: 12px 20px;
             border: none;
@@ -505,511 +456,122 @@ app.post('/ask-question', async (req, res) => {
             text-decoration: none;
             display: inline-block;
             font-weight: bold;
-            transition: background-color 0.3s;
           }
           .btn:hover {
-            background-color: #cc0000; /* Darker red on hover */
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            color: #999999;
-            font-size: 14px;
+            background-color: #cc0000;
           }
         </style>
+        <script>
+          // Check login status when the page loads
+          window.addEventListener('DOMContentLoaded', function() {
+            const isAuthenticated = sessionStorage.getItem('isAuthenticated');
+            if (!isAuthenticated) {
+              window.location.href = '/login';
+            }
+          });
+        </script>
       </head>
       <body>
         <div class="header">
           <div class="logo">CF</div>
-          <h1>Error Analyzing Question</h1>
+          <h1>JIRA Guru Error</h1>
         </div>
         
         <div class="card">
-          <div class="error-message">
-            Something went wrong while analyzing your question. Please try again later.
-          </div>
-          
+          <h2>Error Processing Your Question</h2>
+          <p>We apologize, but we encountered an error while processing your question.</p>
+          <p>Please try again or rephrase your question.</p>
           <a href="/" class="btn">Back to Home</a>
         </div>
-        
-        <div class="footer">
-          © ${new Date().getFullYear()} Channel Factory | Powered by JIRA Guru
-        </div>
       </body>
       </html>
     `);
   }
 });
 
-// API endpoint to handle feedback
-app.post('/api/log-feedback', async (req, res) => {
+// Route to receive feedback
+app.post('/feedback', (req, res) => {
   try {
-    const { itemId, userId, feedback, question, timestamp } = req.body;
+    const { responseId, question, feedback } = req.body;
     
-    // Log feedback to a file
-    const feedbackLog = {
-      itemId,
-      userId: userId || 'anonymous',
-      feedback,
+    // Log the feedback
+    logMessage('INFO', "Received feedback", { responseId, question, feedback });
+    
+    // Save feedback to file
+    const feedbackFile = path.join(feedbackDir, `${responseId}.json`);
+    fs.writeFileSync(feedbackFile, JSON.stringify({
+      responseId,
       question,
-      timestamp
-    };
+      feedback,
+      timestamp: new Date().toISOString()
+    }, null, 2));
     
-    const feedbackPath = path.join(feedbackDir, `${itemId}.json`);
-    fs.writeFileSync(feedbackPath, JSON.stringify(feedbackLog, null, 2));
-    
-    logMessage('INFO', `Feedback logged: ${feedback} for item ${itemId} from ${userId || 'anonymous'}`);
-    
-    res.status(200).json({ success: true });
+    res.json({ success: true });
   } catch (error) {
-    logMessage('ERROR', 'Error logging feedback:', error);
-    res.status(500).json({ success: false, error: 'Failed to log feedback' });
+    logMessage('ERROR', "Error saving feedback", error);
+    res.status(500).json({ error: 'Failed to save feedback' });
   }
 });
 
-// Admin dashboard for logs
+// Admin route to view logs (protected by basic auth)
 app.get('/admin/logs', basicAuth, (req, res) => {
-  try {
-    // Get feedback logs
-    const feedbackLogs = [];
-    if (fs.existsSync(feedbackDir)) {
-      const feedbackFiles = fs.readdirSync(feedbackDir);
-      for (const file of feedbackFiles) {
-        try {
-          const filePath = path.join(feedbackDir, file);
-          const content = fs.readFileSync(filePath, 'utf8');
-          const feedbackData = JSON.parse(content);
-          feedbackLogs.push(feedbackData);
-        } catch (err) {
-          logMessage('ERROR', `Error reading feedback file ${file}:`, err);
-        }
-      }
-    }
-    
-    // Sort feedback logs by timestamp (newest first)
-    feedbackLogs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>CF JIRA Guru - Admin Dashboard</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #000000;
-            color: #ffffff;
-          }
-          .header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 30px;
-          }
-          .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: #ff0000; /* Red accent */
-            margin-right: 15px;
-            padding: 10px;
-            border: 2px solid #ffffff; /* White border */
-            border-radius: 8px;
-          }
-          h1 {
-            color: #ff0000; /* Red accent */
-            margin: 0;
-          }
-          h2 {
-            color: #ffffff;
-            border-bottom: 2px solid #ff0000; /* Red accent */
-            padding-bottom: 8px;
-          }
-          .card {
-            border: 1px solid #ffffff; /* White border */
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 3px 6px rgba(255,255,255,0.2);
-            background-color: #121212; /* Dark card background */
-          }
-          .btn {
-            background-color: #ff0000; /* Red accent */
-            color: white;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            font-weight: bold;
-            transition: background-color 0.3s;
-          }
-          .btn:hover {
-            background-color: #cc0000; /* Darker red on hover */
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-          }
-          th, td {
-            padding: 12px;
-            text-align: left;
-            border-bottom: 1px solid #333333;
-          }
-          th {
-            background-color: #1a1a1a;
-            color: #ff0000; /* Red accent */
-          }
-          tr:hover {
-            background-color: #1a1a1a;
-          }
-          .log-entry {
-            padding: 10px;
-            margin-bottom: 10px;
-            border-left: 3px solid #666666;
-            background-color: #1a1a1a;
-          }
-          .log-entry.error {
-            border-left-color: #ff0000;
-          }
-          .log-entry.info {
-            border-left-color: #0088ff;
-          }
-          .timestamp {
-            color: #999999;
-            font-size: 12px;
-          }
-          .tabs {
-            display: flex;
-            margin-bottom: 20px;
-          }
-          .tab {
-            padding: 12px 24px;
-            cursor: pointer;
-            border: 1px solid #ffffff;
-            background-color: #121212;
-            color: #ffffff;
-          }
-          .tab.active {
-            background-color: #ff0000;
-            color: #ffffff;
-            border-color: #ff0000;
-          }
-          .tab-content {
-            display: none;
-          }
-          .tab-content.active {
-            display: block;
-          }
-          .feedback-up {
-            color: #00cc00;
-          }
-          .feedback-down {
-            color: #ff0000;
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            color: #999999;
-            font-size: 14px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div class="logo">CF</div>
-          <h1>JIRA Guru Admin Dashboard</h1>
-        </div>
-        
-        <div class="tabs">
-          <div class="tab active" onclick="switchTab('feedback')">User Feedback</div>
-          <div class="tab" onclick="switchTab('system')">System Logs</div>
-        </div>
-        
-        <div id="feedback" class="tab-content active">
-          <div class="card">
-            <h2>User Feedback</h2>
-            ${feedbackLogs.length > 0 ? `
-              <table>
-                <tr>
-                  <th>Timestamp</th>
-                  <th>Question</th>
-                  <th>Feedback</th>
-                  <th>User</th>
-                </tr>
-                ${feedbackLogs.map(log => `
-                  <tr>
-                    <td>${new Date(log.timestamp).toLocaleString()}</td>
-                    <td>${log.question || 'N/A'}</td>
-                    <td class="${log.feedback === 'up' ? 'feedback-up' : log.feedback === 'down' ? 'feedback-down' : ''}">
-                      ${log.feedback === 'up' ? '👍 Positive' : log.feedback === 'down' ? '👎 Negative' : 'None'}
-                    </td>
-                    <td>${log.userId || 'anonymous'}</td>
-                  </tr>
-                `).join('')}
-              </table>
-            ` : `<p>No feedback logs available.</p>`}
-          </div>
-        </div>
-        
-        <div id="system" class="tab-content">
-          <div class="card">
-            <h2>Application Logs</h2>
-            <div class="log-entries">
-              ${appLogs.map(log => `
-                <div class="log-entry ${log.type.toLowerCase()}">
-                  <span class="timestamp">${new Date(log.timestamp).toLocaleString()}</span>
-                  <strong>[${log.type}]</strong> ${log.message}
-                  ${log.details ? `<pre>${typeof log.details === 'object' ? JSON.stringify(log.details, null, 2) : log.details}</pre>` : ''}
-                </div>
-              `).join('')}
-            </div>
-          </div>
-        </div>
-        
-        <div class="card">
-          <h2>Actions</h2>
-          <a href="/" class="btn">Back to App</a>
-        </div>
-        
-        <div class="footer">
-          © ${new Date().getFullYear()} Channel Factory | Powered by JIRA Guru
-        </div>
-        
-        <script>
-          function switchTab(tabName) {
-            // Hide all tab contents
-            document.querySelectorAll('.tab-content').forEach(tab => {
-              tab.classList.remove('active');
-            });
-            
-            // Remove active class from all tabs
-            document.querySelectorAll('.tab').forEach(tab => {
-              tab.classList.remove('active');
-            });
-            
-            // Show the selected tab content
-            document.getElementById(tabName).classList.add('active');
-            
-            // Set the clicked tab as active
-            document.querySelector(`.tab[onclick="switchTab('${tabName}')"]`).classList.add('active');
-          }
-        </script>
-      </body>
-      </html>
-    `);
-  } catch (error) {
-    logMessage('ERROR', 'Error rendering admin dashboard:', error);
-    res.status(500).send('Error loading admin dashboard');
-  }
+  res.json({ logs: appLogs });
 });
 
-// Function to get responses from OpenAI
+// Function to get a response from OpenAI
 async function getResponseFromOpenAI(question) {
   try {
-    logMessage('INFO', "Connecting to OpenAI API...");
+    logMessage('INFO', "Sending question to OpenAI API", question);
     
-    // Create a system message that provides context about JIRA tickets and the expected response format
-    const systemMessage = `
-      You are an AI designed to answer questions about Channel Factory JIRA Tickets by providing smart, clear, and comprehensive summaries using the knowledge found across multiple related tickets.
-      
-      Your primary goal is to answer questions about JIRA tickets using combined insights from multiple relevant tickets, not just one.
-      
-      Response Style:
-      - Start with a high-level summary: Tell the big picture first.
-      - Highlight patterns: Common issues, recurring resolutions, best practices.
-      - Use real examples when needed: Refer to actual ticket IDs or summaries.
-      - Focus on synthesis, not just copying from a single source.
-      
-      Constraints:
-      - Only include info relevant to Channel Factory and the question asked.
-      - Keep it professional and helpful.
-      - Use clear, simple language — explain terms if needed.
-      - No jargon unless it's unavoidable (and if used, define it).
-      
-      Format your response in HTML with appropriate headings, bullet points, and formatting.
-      For ticket references, use the format: <span class="ticket-reference">CF-1234</span>
-    `;
+    // Create a system message that provides context to the AI
+    const systemMessage = `You are JIRA Guru, an AI assistant specialized in analyzing and providing insights about Channel Factory's JIRA tickets and development processes. 
     
-    // Call OpenAI API with the configured client
+Provide comprehensive, accurate, and helpful responses to questions about JIRA tickets, development workflows, and technical issues.
+
+When responding:
+1. Be specific and detailed in your explanations
+2. If you don't have specific information, acknowledge that but provide general best practices
+3. Format your responses with clear headings and bullet points when appropriate
+4. Keep your tone professional and helpful`;
+    
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-4-turbo",
       messages: [
         { role: "system", content: systemMessage },
         { role: "user", content: question }
       ],
       temperature: 0.7,
-      max_tokens: 1500
+      max_tokens: 2000
     });
     
-    logMessage('INFO', "Received response from OpenAI");
+    const response = completion.choices[0].message.content;
+    logMessage('INFO', "Received response from OpenAI", { 
+      questionLength: question.length, 
+      responseLength: response.length 
+    });
     
-    // Return the HTML response
-    return completion.choices[0].message.content;
+    return response;
   } catch (error) {
-    logMessage('ERROR', 'Error calling OpenAI API:', error);
-    
-    // Implement a more robust fallback with detailed knowledge
+    logMessage('ERROR', "Error getting response from OpenAI", error);
     return createFallbackResponse(question);
   }
 }
 
-// Create a fallback response based on predefined knowledge
+// Function to create a fallback response if OpenAI API fails
 function createFallbackResponse(question) {
-  console.log("Using fallback response mechanism");
+  return `<p>I apologize, but I'm currently unable to provide a specific analysis for your question about "${question}".</p>
   
-  // Lowercase the question for better matching
-  const questionLower = question.toLowerCase();
+  <p>This could be due to one of the following reasons:</p>
+  <ul>
+    <li>The AI service is temporarily unavailable</li>
+    <li>Your question requires more specific context that I don't currently have access to</li>
+    <li>There might be an issue with the connection to our AI provider</li>
+  </ul>
   
-  // Define patterns to match and their corresponding responses
-  const knowledgeBase = [
-    {
-      patterns: ['deploy', 'deployment', 'qa', 'failed', 'failure'],
-      response: `
-        <h3>Handling Failed Deployments in QA</h3>
-        <p>Based on the analysis of Channel Factory's JIRA tickets, we've identified several patterns in how the team addresses failed deployments in QA environments:</p>
-        
-        <h4>Common Root Causes:</h4>
-        <ul>
-          <li>Configuration mismatches between environments</li>
-          <li>Database migration issues</li>
-          <li>Third-party API integration failures</li>
-          <li>Missing environment variables</li>
-        </ul>
-        
-        <h4>Standard Resolution Process:</h4>
-        <ol>
-          <li>Immediate rollback to previous stable version (<span class="ticket-reference">CF-1234</span>, <span class="ticket-reference">CF-2546</span>)</li>
-          <li>Post-mortem analysis with the development and QA teams</li>
-          <li>Root cause documentation in JIRA</li>
-          <li>Specific fixes based on failure type</li>
-          <li>Enhanced pre-deployment testing implementation (<span class="ticket-reference">CF-3872</span>)</li>
-        </ol>
-        
-        <h4>Key Improvements Over Time:</h4>
-        <p>Recent tickets (<span class="ticket-reference">CF-4291</span>, <span class="ticket-reference">CF-5183</span>) show that the team has implemented:</p>
-        <ul>
-          <li>Automated deployment validation scripts</li>
-          <li>Enhanced monitoring of QA environments</li>
-          <li>Standardized deployment checklists</li>
-        </ul>
-        
-        <p>On average, critical deployment failures are resolved within 4-6 hours, with comprehensive fixes typically completed within 1-2 sprint cycles.</p>
-      `
-    },
-    {
-      patterns: ['data', 'pillar', 'branch', 'third', 'parties', 'initiative'],
-      response: `
-        <h3>Data Pillar: Branch 1 - Third Parties Initiative</h3>
-        <p>Based on comprehensive analysis of JIRA tickets related to the "Data Pillar: Branch 1: Third Parties" initiative, several recurring themes have emerged:</p>
-        
-        <h4>Key Objectives:</h4>
-        <ul>
-          <li>Standardization of third-party data integrations (<span class="ticket-reference">CF-3245</span>)</li>
-          <li>Enhanced data security for partner information (<span class="ticket-reference">CF-3612</span>)</li>
-          <li>Optimization of data exchange protocols (<span class="ticket-reference">CF-4023</span>)</li>
-          <li>Compliance with international data regulations (<span class="ticket-reference">CF-4532</span>)</li>
-        </ul>
-        
-        <h4>Implementation Challenges:</h4>
-        <p>Recurring issues documented across multiple tickets include:</p>
-        <ul>
-          <li>API version compatibility between partners</li>
-          <li>Data format standardization</li>
-          <li>Performance bottlenecks during peak data exchange periods</li>
-          <li>Authentication and authorization complexity</li>
-        </ul>
-        
-        <h4>Success Metrics:</h4>
-        <p>According to <span class="ticket-reference">CF-5241</span> and <span class="ticket-reference">CF-5873</span>:</p>
-        <ul>
-          <li>50% reduction in data integration failures</li>
-          <li>30% improvement in data processing time</li>
-          <li>Successful implementation across 12 major third-party partners</li>
-          <li>Complete compliance documentation for GDPR and CCPA</li>
-        </ul>
-        
-        <p>The initiative has evolved from initial proof-of-concept to full production implementation over three quarters, with the Data Engineering team leading most efforts in collaboration with Security and Compliance teams.</p>
-      `
-    },
-    {
-      patterns: ['bug', 'tracking', 'priority', 'critical'],
-      response: `
-        <h3>Bug Tracking and Priority Assignment Process</h3>
-        <p>Analysis of Channel Factory's JIRA tickets reveals a consistent approach to bug tracking and priority assignment:</p>
-        
-        <h4>Priority Classification System:</h4>
-        <ul>
-          <li><strong>P0 (Critical)</strong>: Production outages, data loss, security breaches</li>
-          <li><strong>P1 (High)</strong>: Major functionality broken, significant user impact</li>
-          <li><strong>P2 (Medium)</strong>: Important functionality affected, workarounds exist</li>
-          <li><strong>P3 (Low)</strong>: Minor issues, cosmetic defects</li>
-        </ul>
-        
-        <h4>Critical Bug Resolution Process:</h4>
-        <p>Based on tickets <span class="ticket-reference">CF-2187</span>, <span class="ticket-reference">CF-3326</span>, and <span class="ticket-reference">CF-4730</span>:</p>
-        <ol>
-          <li>Immediate triage and team assignment</li>
-          <li>War room establishment for P0/P1 issues</li>
-          <li>Regular stakeholder updates (30-60 minute intervals)</li>
-          <li>Hotfix deployment outside regular release cycles</li>
-          <li>Post-incident analysis and documentation</li>
-        </ol>
-        
-        <h4>SLA Targets by Priority:</h4>
-        <ul>
-          <li><strong>P0</strong>: Resolution within 4 hours</li>
-          <li><strong>P1</strong>: Resolution within 24 hours</li>
-          <li><strong>P2</strong>: Resolution within 1 week</li>
-          <li><strong>P3</strong>: Resolution within 2-4 weeks</li>
-        </ul>
-        
-        <p>Recent process improvements documented in <span class="ticket-reference">CF-5932</span> include automated initial diagnostics, enhanced impact assessment tools, and improved cross-team collaboration protocols during critical incidents.</p>
-      `
-    }
-  ];
-  
-  // Find the most relevant response based on keyword matching
-  let bestResponse = null;
-  let bestMatchCount = 0;
-  
-  for (const entry of knowledgeBase) {
-    const matchCount = entry.patterns.filter(pattern => 
-      questionLower.includes(pattern.toLowerCase())
-    ).length;
-    
-    if (matchCount > bestMatchCount) {
-      bestMatchCount = matchCount;
-      bestResponse = entry.response;
-    }
-  }
-  
-  // If no good match found, return a general response
-  if (bestMatchCount < 2) {
-    return `
-      <h3>General JIRA Information</h3>
-      <p>I couldn't connect to our knowledge base for your specific question about "${question}". However, here's some general information that might be helpful:</p>
-      
-      <h4>Channel Factory's JIRA Processes:</h4>
-      <ul>
-        <li>All development work is tracked through JIRA tickets</li>
-        <li>Tickets follow a workflow: Backlog → In Progress → Review → Testing → Done</li>
-        <li>Estimates are provided using story points on the Fibonacci scale</li>
-        <li>Bugs are prioritized from P0 (Critical) to P3 (Low)</li>
-        <li>Regular sprint planning and retrospective meetings ensure continuous improvement</li>
-      </ul>
-      
-      <p>While I can't provide specific information about "${question}" at this moment, the system will be updated to include more comprehensive answers in the future.</p>
-    `;
-  }
-  
-  return bestResponse;
+  <p>Please try again in a few minutes or rephrase your question to be more specific. Alternatively, you can contact the Channel Factory support team for direct assistance.</p>`;
 }
 
 // Start the server
 app.listen(PORT, () => {
-  logMessage('INFO', `Channel Factory JIRA Guru app listening at http://localhost:${PORT}`);
+  logMessage('INFO', `JIRA Guru application listening on port ${PORT}`);
 }); 
