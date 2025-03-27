@@ -1,15 +1,20 @@
 services:
   - type: web
-    name: jira-guru
+    name: channel-factory-jira-guru
     env: node
+    region: ohio
+    plan: free
     buildCommand: npm install
     startCommand: node src/index.js
     envVars:
       - key: PORT
         value: 3000
+      - key: NODE_ENV
+        value: production
       - key: RESPONSES_API_KEY
         sync: false
-    plan: free
+      - key: OPENAI_API_KEY
+        sync: false
     autoDeploy: true
     disk:
       name: feedback-data

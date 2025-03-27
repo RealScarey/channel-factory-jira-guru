@@ -2,16 +2,15 @@ version: '3'
 
 services:
   jira-guru:
-    build: 
-      context: .
-      dockerfile: Dockerfile
+    build: .
     ports:
-      - "3000:3000"
-    environment:
-      - PORT=3000
-      # You'll need to replace this with your actual OpenAI API key
-      - RESPONSES_API_KEY=your_openai_api_key
+      - "3002:3000"
     volumes:
-      # Persist feedback data
+      - ./src:/app/src
+      - ./.env:/app/.env
       - ./src/feedback:/app/src/feedback
-    restart: unless-stopped 
+    environment:
+      - NODE_ENV=development
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    restart: unless-stopped
+    command: npm start
