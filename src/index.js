@@ -4,6 +4,7 @@ const path = require('path');
 const axios = require('axios');
 const OpenAI = require('openai');
 const fs = require('fs');
+const session = require('express-session');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,6 +12,27 @@ const PORT = process.env.PORT || 3000;
 // Add an array to store recent application logs
 const appLogs = [];
 const MAX_LOGS = 100; // Maximum number of logs to keep in memory
+
+// Configure session middleware
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'jiragurusecret',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
+  }
+}));
+
+// Authentication middleware
+function requireAuth(req, res, next) {
+  if (req.session.isAuthenticated) {
+    next();
+  } else {
+    res.redirect('/login');
+  }
+}
 
 // Add a function to log messages with timestamps
 function logMessage(type, message, details = null) {
@@ -51,51 +73,6 @@ if (!fs.existsSync(feedbackDir)) {
   logMessage('INFO', "Created feedback directory", feedbackDir);
 }
 
-// Simple basic auth middleware for admin routes
-function basicAuth(req, res, next) {
-  // If a request comes from localhost in development, skip auth
-  if (process.env.NODE_ENV === 'development' && req.ip.includes('127.0.0.1')) {
-    return next();
-  }
-  
-  const authHeader = req.headers.authorization;
-  
-  if (!authHeader) {
-    res.setHeader('WWW-Authenticate', 'Basic realm="CF JIRA Guru Admin"');
-    return res.status(401).send('Authentication required');
-  }
-  
-  const auth = Buffer.from(authHeader.split(' ')[1], 'base64').toString().split(':');
-  const user = auth[0];
-  const pass = auth[1];
-  
-  // Simple hardcoded admin credentials - in a real app, use environment variables
-  if (user === 'admin' && pass === 'jiraguruadmin') {
-    next();
-  } else {
-    res.setHeader('WWW-Authenticate', 'Basic realm="CF JIRA Guru Admin"');
-    return res.status(401).send('Authentication failed');
-  }
-}
-
-// Authentication middleware for client-side auth
-function ensureAuthenticated(req, res, next) {
-  // In a real application, you'd verify a token or session
-  // For this example, we'll check for a custom header that the frontend will set
-  const isAuthenticated = req.get('X-Auth-Status') === 'authenticated';
-  
-  if (isAuthenticated) {
-    return next();
-  } else {
-    // For API requests, return 401
-    if (req.path.startsWith('/api/')) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
-    // For page requests, redirect to login
-    return res.redirect('/login');
-  }
-}
-
 // Routes
 
 // Root route - redirect to login
@@ -105,7 +82,167 @@ app.get('/', (req, res) => {
 
 // Login route - serve the login page
 app.get('/login', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+  if (req.session.isAuthenticated) {
+    return res.redirect('/');
+  }
+  
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>CF JIRA Guru - Login</title>
+      <style>
+        body {
+          font-family: Arial, sans-serif;
+          max-width: 900px;
+          margin: 0 auto;
+          padding: 20px;
+          background-color: #000000;
+          color: #ffffff;
+          display: flex;
+          flex-direction: column;
+          min-height: 100vh;
+        }
+        .header {
+          display: flex;
+          align-items: center;
+          margin-bottom: 30px;
+        }
+        .logo {
+          font-size: 24px;
+          font-weight: bold;
+          color: #ff0000;
+          margin-right: 15px;
+          padding: 10px;
+          border: 2px solid #ffffff;
+          border-radius: 8px;
+        }
+        h1 {
+          color: #ff0000;
+          margin: 0;
+        }
+        .card {
+          border: 1px solid #ffffff;
+          border-radius: 8px;
+          padding: 20px;
+          margin-bottom: 20px;
+          box-shadow: 0 3px 6px rgba(255,255,255,0.2);
+          background-color: #121212;
+        }
+        .login-form {
+          display: flex;
+          flex-direction: column;
+          gap: 15px;
+        }
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+        }
+        input[type="text"],
+        input[type="password"] {
+          padding: 12px;
+          border: 1px solid #ffffff;
+          border-radius: 6px;
+          font-size: 16px;
+          background-color: #333333;
+          color: #ffffff;
+          transition: border-color 0.3s;
+        }
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+          border-color: #ff0000;
+          outline: none;
+        }
+        .btn {
+          background-color: #ff0000;
+          color: white;
+          padding: 12px 20px;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-weight: bold;
+          transition: background-color 0.3s;
+          text-align: center;
+        }
+        .btn:hover {
+          background-color: #cc0000;
+        }
+        .error-message {
+          color: #ff0000;
+          background-color: rgba(255, 0, 0, 0.1);
+          padding: 10px;
+          border-radius: 4px;
+          margin-bottom: 15px;
+          display: ${req.query.error ? 'block' : 'none'};
+        }
+        .footer {
+          margin-top: auto;
+          text-align: center;
+          color: #999999;
+          font-size: 14px;
+          padding: 20px 0;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="logo">CF</div>
+        <h1>JIRA Guru Login</h1>
+      </div>
+      
+      <div class="card">
+        <div class="error-message">
+          Invalid username or password. Please try again.
+        </div>
+        
+        <form class="login-form" action="/login" method="POST">
+          <div class="form-group">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required>
+          </div>
+          
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+          </div>
+          
+          <button type="submit" class="btn">Login</button>
+        </form>
+      </div>
+      
+      <div class="footer">
+        © ${new Date().getFullYear()} Channel Factory | Powered by JIRA Guru
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// Login POST handler
+app.post('/login', (req, res) => {
+  const { username, password } = req.body;
+  
+  if (username === 'admin' && password === 'jiraguru') {
+    req.session.isAuthenticated = true;
+    res.redirect('/');
+  } else {
+    res.redirect('/login?error=1');
+  }
+});
+
+// Logout route
+app.get('/logout', (req, res) => {
+  req.session.destroy();
+  res.redirect('/login');
+});
+
+// Apply authentication middleware to all routes except login
+app.use((req, res, next) => {
+  if (req.path === '/login') {
+    return next();
+  }
+  requireAuth(req, res, next);
 });
 
 // Main app route - only accessible after login
@@ -514,7 +651,7 @@ app.post('/feedback', (req, res) => {
 });
 
 // Admin route to view logs (protected by basic auth)
-app.get('/admin/logs', basicAuth, (req, res) => {
+app.get('/admin/logs', (req, res) => {
   res.json({ logs: appLogs });
 });
 
