@@ -368,18 +368,42 @@ app.get('/', (req, res) => {
           margin-bottom: 25px;
         }
         
-        .analysis-content p {
-          margin-bottom: 15px;
+        .analysis-content h4 {
+          color: #ff0000;
+          margin: 30px 0 15px 0;
+          font-size: 1.3em;
+          border-bottom: 1px solid #333333;
+          padding-bottom: 8px;
         }
         
-        .analysis-content ul, 
-        .analysis-content ol {
-          margin-left: 20px;
-          margin-bottom: 15px;
+        .analysis-content h4:first-child {
+          margin-top: 0;
+        }
+        
+        .analysis-content h5 {
+          color: #ffffff;
+          margin: 20px 0 10px 0;
+          font-size: 1.1em;
+        }
+        
+        .analysis-content p {
+          margin: 0 0 15px 0;
+          text-align: justify;
+        }
+        
+        .analysis-content ul {
+          margin: 0 0 20px 20px;
+          padding: 0;
         }
         
         .analysis-content li {
-          margin-bottom: 8px;
+          margin-bottom: 10px;
+          line-height: 1.5;
+        }
+        
+        .analysis-content strong {
+          color: #ff6666;
+          font-weight: normal;
         }
         
         .ticket-reference {
@@ -389,6 +413,7 @@ app.get('/', (req, res) => {
           font-family: monospace;
           font-size: 0.9em;
           border: 1px solid #666666;
+          white-space: nowrap;
         }
         
         .response-actions {
@@ -468,6 +493,21 @@ app.get('/', (req, res) => {
         textarea:focus {
           border-color: #ff0000;
           outline: none;
+        }
+        
+        /* Improve readability on mobile */
+        @media (max-width: 768px) {
+          .analysis-content {
+            font-size: 0.95em;
+          }
+          
+          .analysis-content h4 {
+            font-size: 1.2em;
+          }
+          
+          .analysis-content h5 {
+            font-size: 1.05em;
+          }
         }
       </style>
     </head>
@@ -620,7 +660,42 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Modify the ask-question endpoint to return JSON
+// Function to format the OpenAI response with proper structure
+function formatAnalysisResponse(text) {
+  // Split by section headers (marked with ##)
+  const sections = text.split(/(?=##)/g);
+  
+  return sections.map(section => {
+    // Format section headers
+    section = section.replace(/##\s*([^#\n]+)/g, '<h4>$1</h4>');
+    
+    // Format subsection headers (marked with numbers and asterisks)
+    section = section.replace(/(\d+\.\s*\*\*[^*]+\*\*)/g, '<h5>$1</h5>');
+    
+    // Format bullet points
+    section = section.replace(/###\s*([^\n]+)/g, '<h5>$1</h5>');
+    
+    // Format ticket references
+    section = section.replace(/CF-\d+/g, match => `<span class="ticket-reference">${match}</span>`);
+    
+    // Convert asterisk emphasis to proper HTML
+    section = section.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    
+    // Split into paragraphs and wrap them
+    const paragraphs = section.split(/\n\s*\n/);
+    return paragraphs.map(p => {
+      if (p.trim().startsWith('<h')) return p;
+      if (p.trim().startsWith('-')) {
+        // Convert bullet points to list items
+        const items = p.split(/\n\s*-\s*/).filter(item => item.trim());
+        return '<ul>' + items.map(item => `<li>${item.trim()}</li>`).join('') + '</ul>';
+      }
+      return `<p>${p.trim()}</p>`;
+    }).join('\n');
+  }).join('\n');
+}
+
+// Update the ask-question endpoint
 app.post('/ask-question', async (req, res) => {
   try {
     const { question } = req.body;
@@ -631,6 +706,9 @@ app.post('/ask-question', async (req, res) => {
     
     // Get analysis from OpenAI
     const analysis = await getResponseFromOpenAI(question);
+    
+    // Format the analysis
+    const formattedAnalysis = formatAnalysisResponse(analysis);
     
     // Return JSON response
     res.json({
@@ -644,7 +722,7 @@ app.post('/ask-question', async (req, res) => {
           
           <h3>Analysis</h3>
           <div class="analysis-content">
-            ${analysis}
+            ${formattedAnalysis}
           </div>
           
           <div class="response-actions">
