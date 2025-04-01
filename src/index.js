@@ -13,6 +13,11 @@ const PORT = process.env.PORT || 3000;
 const appLogs = [];
 const MAX_LOGS = 100; // Maximum number of logs to keep in memory
 
+// Configure middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Configure session middleware
 app.use(session({
   secret: process.env.SESSION_SECRET || 'jiragurusecret',
@@ -24,15 +29,6 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
-
-// Authentication middleware
-function requireAuth(req, res, next) {
-  if (req.session.isAuthenticated) {
-    next();
-  } else {
-    res.redirect('/login');
-  }
-}
 
 // Add a function to log messages with timestamps
 function logMessage(type, message, details = null) {
@@ -59,28 +55,7 @@ const openai = new OpenAI({
   apiKey: process.env.RESPONSES_API_KEY
 });
 
-logMessage('INFO', "Starting Channel Factory JIRA Guru application with OpenAI integration...");
-
-// Configure middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
-
-// Create directory for feedback logs if it doesn't exist
-const feedbackDir = path.join(__dirname, 'feedback');
-if (!fs.existsSync(feedbackDir)) {
-  fs.mkdirSync(feedbackDir, { recursive: true });
-  logMessage('INFO', "Created feedback directory", feedbackDir);
-}
-
-// Routes
-
-// Root route - redirect to login
-app.get('/', (req, res) => {
-  res.redirect('/login');
-});
-
-// Login route - serve the login page
+// Login page route - must be before auth middleware
 app.get('/login', (req, res) => {
   if (req.session.isAuthenticated) {
     return res.redirect('/');
@@ -219,7 +194,7 @@ app.get('/login', (req, res) => {
   `);
 });
 
-// Login POST handler
+// Login POST handler - must be before auth middleware
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   
@@ -231,11 +206,19 @@ app.post('/login', (req, res) => {
   }
 });
 
-// Logout route
+// Logout route - must be before auth middleware
 app.get('/logout', (req, res) => {
   req.session.destroy();
   res.redirect('/login');
 });
+
+// Authentication middleware - after login routes
+function requireAuth(req, res, next) {
+  if (req.session.isAuthenticated) {
+    return next();
+  }
+  res.redirect('/login');
+}
 
 // Apply authentication middleware to all routes except login
 app.use((req, res, next) => {
@@ -245,8 +228,8 @@ app.use((req, res, next) => {
   requireAuth(req, res, next);
 });
 
-// Main app route - only accessible after login
-app.get('/app', (req, res) => {
+// Protected routes below this line
+app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -264,36 +247,49 @@ app.get('/app', (req, res) => {
         .header {
           display: flex;
           align-items: center;
+          justify-content: space-between;
           margin-bottom: 30px;
+        }
+        .logo-section {
+          display: flex;
+          align-items: center;
         }
         .logo {
           font-size: 24px;
           font-weight: bold;
-          color: #ff0000; /* Red accent */
+          color: #ff0000;
           margin-right: 15px;
           padding: 10px;
-          border: 2px solid #ffffff; /* White border */
+          border: 2px solid #ffffff;
           border-radius: 8px;
         }
+        .logout-btn {
+          background-color: #333333;
+          color: white;
+          padding: 8px 16px;
+          border: 1px solid #ffffff;
+          border-radius: 6px;
+          cursor: pointer;
+          text-decoration: none;
+          font-size: 14px;
+        }
+        .logout-btn:hover {
+          background-color: #444444;
+        }
         h1 {
-          color: #ff0000; /* Red accent */
+          color: #ff0000;
           margin: 0;
         }
-        h2 {
-          color: #ffffff;
-          border-bottom: 2px solid #ff0000; /* Red accent */
-          padding-bottom: 8px;
-        }
         .card {
-          border: 1px solid #ffffff; /* White border */
+          border: 1px solid #ffffff;
           border-radius: 8px;
           padding: 20px;
           margin-bottom: 20px;
           box-shadow: 0 3px 6px rgba(255,255,255,0.2);
-          background-color: #121212; /* Dark card background */
+          background-color: #121212;
         }
         .btn {
-          background-color: #ff0000; /* Red accent */
+          background-color: #ff0000;
           color: white;
           padding: 12px 20px;
           border: none;
@@ -305,7 +301,7 @@ app.get('/app', (req, res) => {
           transition: background-color 0.3s;
         }
         .btn:hover {
-          background-color: #cc0000; /* Darker red on hover */
+          background-color: #cc0000;
         }
         .search-form {
           margin-bottom: 20px;
@@ -315,35 +311,26 @@ app.get('/app', (req, res) => {
         input[type="text"] {
           padding: 12px;
           flex-grow: 1;
-          border: 1px solid #ffffff; /* White border */
+          border: 1px solid #ffffff;
           border-radius: 6px;
           font-size: 16px;
-          transition: border-color 0.3s;
           background-color: #333333;
           color: #ffffff;
         }
         input[type="text"]:focus {
-          border-color: #ff0000; /* Red accent */
+          border-color: #ff0000;
           outline: none;
-        }
-        .footer {
-          margin-top: 40px;
-          text-align: center;
-          color: #999999;
-          font-size: 14px;
         }
         #response-container {
           display: none;
           margin-top: 20px;
         }
-        
         .loading {
           text-align: center;
           padding: 20px;
           font-style: italic;
           color: #999999;
         }
-        
         .error-message {
           color: #ff0000;
           background-color: rgba(255, 0, 0, 0.1);
@@ -351,21 +338,21 @@ app.get('/app', (req, res) => {
           border-radius: 4px;
           margin-bottom: 15px;
         }
+        .footer {
+          margin-top: 40px;
+          text-align: center;
+          color: #999999;
+          font-size: 14px;
+        }
       </style>
-      <script>
-        // Check login status when the page loads
-        window.addEventListener('DOMContentLoaded', function() {
-          const isAuthenticated = sessionStorage.getItem('isAuthenticated');
-          if (!isAuthenticated) {
-            window.location.href = '/login';
-          }
-        });
-      </script>
     </head>
     <body>
       <div class="header">
-        <div class="logo">CF</div>
-        <h1>JIRA Guru Assistant</h1>
+        <div class="logo-section">
+          <div class="logo">CF</div>
+          <h1>JIRA Guru Assistant</h1>
+        </div>
+        <a href="/logout" class="logout-btn">Logout</a>
       </div>
       
       <div class="card">
