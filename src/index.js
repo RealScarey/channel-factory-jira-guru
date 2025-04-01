@@ -344,6 +344,131 @@ app.get('/', (req, res) => {
           color: #999999;
           font-size: 14px;
         }
+        .response-section {
+          margin-top: 30px;
+        }
+        
+        .response-section h3 {
+          color: #ff0000;
+          margin-bottom: 15px;
+          font-size: 1.2em;
+        }
+        
+        .question-text {
+          font-style: italic;
+          background-color: #1a1a1a;
+          padding: 15px;
+          border-radius: 6px;
+          margin-bottom: 25px;
+          border-left: 4px solid #ff0000;
+        }
+        
+        .analysis-content {
+          line-height: 1.6;
+          margin-bottom: 25px;
+        }
+        
+        .analysis-content p {
+          margin-bottom: 15px;
+        }
+        
+        .analysis-content ul, 
+        .analysis-content ol {
+          margin-left: 20px;
+          margin-bottom: 15px;
+        }
+        
+        .analysis-content li {
+          margin-bottom: 8px;
+        }
+        
+        .ticket-reference {
+          background-color: #333333;
+          padding: 2px 6px;
+          border-radius: 3px;
+          font-family: monospace;
+          font-size: 0.9em;
+          border: 1px solid #666666;
+        }
+        
+        .response-actions {
+          display: flex;
+          gap: 10px;
+          margin-top: 25px;
+          padding-top: 20px;
+          border-top: 1px solid #333333;
+        }
+        
+        .btn-secondary {
+          background-color: #333333;
+          border: 1px solid #ffffff;
+        }
+        
+        .btn-secondary:hover {
+          background-color: #444444;
+        }
+        
+        .btn-outline {
+          background-color: transparent;
+          border: 1px solid #ff0000;
+          color: #ff0000;
+        }
+        
+        .btn-outline:hover {
+          background-color: #ff0000;
+          color: #ffffff;
+        }
+        
+        .feedback-modal {
+          display: none;
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0, 0, 0, 0.8);
+          z-index: 1000;
+        }
+        
+        .modal-content {
+          background-color: #121212;
+          margin: 10% auto;
+          padding: 20px;
+          border: 1px solid #ffffff;
+          border-radius: 8px;
+          max-width: 500px;
+          position: relative;
+        }
+        
+        .modal-close {
+          position: absolute;
+          right: 15px;
+          top: 10px;
+          font-size: 24px;
+          cursor: pointer;
+          color: #666666;
+        }
+        
+        .modal-close:hover {
+          color: #ffffff;
+        }
+        
+        textarea {
+          width: 100%;
+          min-height: 100px;
+          margin: 15px 0;
+          padding: 10px;
+          background-color: #333333;
+          border: 1px solid #666666;
+          border-radius: 4px;
+          color: #ffffff;
+          font-family: inherit;
+        }
+        
+        textarea:focus {
+          border-color: #ff0000;
+          outline: none;
+        }
       </style>
     </head>
     <body>
@@ -377,7 +502,20 @@ app.get('/', (req, res) => {
         © ${new Date().getFullYear()} Channel Factory | Powered by JIRA Guru
       </div>
       
+      <!-- Feedback Modal -->
+      <div id="feedback-modal" class="feedback-modal">
+        <div class="modal-content">
+          <span class="modal-close" onclick="closeFeedbackModal()">&times;</span>
+          <h3>Provide Feedback</h3>
+          <p>Please share your thoughts on this response:</p>
+          <textarea id="feedback-text" placeholder="Your feedback helps us improve..."></textarea>
+          <button onclick="submitFeedback()" class="btn">Submit Feedback</button>
+        </div>
+      </div>
+      
       <script>
+        let currentResponseId = null;
+        
         document.getElementById('question-form').addEventListener('submit', async function(e) {
           e.preventDefault();
           
@@ -407,6 +545,7 @@ app.get('/', (req, res) => {
             }
             
             const result = await response.json();
+            currentResponseId = result.responseId;
             
             // Hide loading and show result
             loadingIndicator.style.display = 'none';
@@ -420,6 +559,61 @@ app.get('/', (req, res) => {
             analysisResult.innerHTML = '<div class="error-message">Sorry, there was an error analyzing your question. Please try again later.</div>';
           }
         });
+        
+        function clearResponse() {
+          const questionInput = document.getElementById('question-input');
+          const responseContainer = document.getElementById('response-container');
+          const analysisResult = document.getElementById('analysis-result');
+          
+          questionInput.value = '';
+          responseContainer.style.display = 'none';
+          analysisResult.innerHTML = '';
+          currentResponseId = null;
+        }
+        
+        function provideFeedback(responseId) {
+          document.getElementById('feedback-modal').style.display = 'block';
+          currentResponseId = responseId;
+        }
+        
+        function closeFeedbackModal() {
+          document.getElementById('feedback-modal').style.display = 'none';
+          document.getElementById('feedback-text').value = '';
+        }
+        
+        async function submitFeedback() {
+          const feedbackText = document.getElementById('feedback-text').value.trim();
+          
+          if (!feedbackText) {
+            alert('Please enter your feedback before submitting.');
+            return;
+          }
+          
+          try {
+            const response = await fetch('/api/feedback', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                responseId: currentResponseId,
+                feedback: feedbackText,
+                question: document.getElementById('question-input').value
+              })
+            });
+            
+            if (!response.ok) {
+              throw new Error('Failed to submit feedback');
+            }
+            
+            alert('Thank you for your feedback!');
+            closeFeedbackModal();
+            
+          } catch (error) {
+            console.error('Error submitting feedback:', error);
+            alert('Sorry, there was an error submitting your feedback. Please try again.');
+          }
+        }
       </script>
     </body>
     </html>
@@ -432,13 +626,33 @@ app.post('/ask-question', async (req, res) => {
     const { question } = req.body;
     console.log('Received question: "' + question + '"');
     
+    // Generate a unique ID for this question/response
+    const responseId = `response-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    
     // Get analysis from OpenAI
     const analysis = await getResponseFromOpenAI(question);
     
     // Return JSON response
     res.json({
       success: true,
-      analysis: analysis
+      responseId,
+      question,
+      analysis: `
+        <div class="response-section">
+          <h3>Your Question</h3>
+          <div class="question-text">${question}</div>
+          
+          <h3>Analysis</h3>
+          <div class="analysis-content">
+            ${analysis}
+          </div>
+          
+          <div class="response-actions">
+            <button onclick="clearResponse()" class="btn btn-secondary">Ask Another Question</button>
+            <button onclick="provideFeedback('${responseId}')" class="btn btn-outline">Provide Feedback</button>
+          </div>
+        </div>
+      `
     });
     
   } catch (error) {
@@ -450,27 +664,30 @@ app.post('/ask-question', async (req, res) => {
   }
 });
 
-// Route to receive feedback
-app.post('/feedback', (req, res) => {
+// Add feedback endpoint
+app.post('/api/feedback', async (req, res) => {
   try {
-    const { responseId, question, feedback } = req.body;
+    const { responseId, feedback, question } = req.body;
     
-    // Log the feedback
-    logMessage('INFO', "Received feedback", { responseId, question, feedback });
+    // Create feedback directory if it doesn't exist
+    const feedbackDir = path.join(__dirname, 'feedback');
+    if (!fs.existsSync(feedbackDir)) {
+      fs.mkdirSync(feedbackDir, { recursive: true });
+    }
     
     // Save feedback to file
-    const feedbackFile = path.join(feedbackDir, `${responseId}.json`);
-    fs.writeFileSync(feedbackFile, JSON.stringify({
+    const feedbackPath = path.join(feedbackDir, `${responseId}.json`);
+    fs.writeFileSync(feedbackPath, JSON.stringify({
       responseId,
-      question,
       feedback,
+      question,
       timestamp: new Date().toISOString()
     }, null, 2));
     
     res.json({ success: true });
   } catch (error) {
-    logMessage('ERROR', "Error saving feedback", error);
-    res.status(500).json({ error: 'Failed to save feedback' });
+    console.error('Error saving feedback:', error);
+    res.status(500).json({ success: false, error: 'Failed to save feedback' });
   }
 });
 
