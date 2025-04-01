@@ -13,11 +13,6 @@ const PORT = process.env.PORT || 3000;
 const appLogs = [];
 const MAX_LOGS = 100; // Maximum number of logs to keep in memory
 
-// Configure middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
-
 // Configure session middleware
 app.use(session({
   secret: process.env.SESSION_SECRET || 'jiragurusecret',
@@ -29,6 +24,15 @@ app.use(session({
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
   }
 }));
+
+// Authentication middleware
+function requireAuth(req, res, next) {
+  if (req.session.isAuthenticated) {
+    next();
+  } else {
+    res.redirect('/login');
+  }
+}
 
 // Add a function to log messages with timestamps
 function logMessage(type, message, details = null) {
@@ -57,6 +61,11 @@ const openai = new OpenAI({
 
 logMessage('INFO', "Starting Channel Factory JIRA Guru application with OpenAI integration...");
 
+// Configure middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Create directory for feedback logs if it doesn't exist
 const feedbackDir = path.join(__dirname, 'feedback');
 if (!fs.existsSync(feedbackDir)) {
@@ -64,16 +73,14 @@ if (!fs.existsSync(feedbackDir)) {
   logMessage('INFO', "Created feedback directory", feedbackDir);
 }
 
-// Authentication middleware
-function requireAuth(req, res, next) {
-  if (req.session.isAuthenticated) {
-    next();
-  } else {
-    res.redirect('/login');
-  }
-}
+// Routes
 
-// Login page route - should be before the auth middleware
+// Root route - redirect to login
+app.get('/', (req, res) => {
+  res.redirect('/login');
+});
+
+// Login route - serve the login page
 app.get('/login', (req, res) => {
   if (req.session.isAuthenticated) {
     return res.redirect('/');
@@ -212,7 +219,7 @@ app.get('/login', (req, res) => {
   `);
 });
 
-// Login POST handler - should be before the auth middleware
+// Login POST handler
 app.post('/login', (req, res) => {
   const { username, password } = req.body;
   
@@ -224,7 +231,7 @@ app.post('/login', (req, res) => {
   }
 });
 
-// Logout route - should be before the auth middleware
+// Logout route
 app.get('/logout', (req, res) => {
   req.session.destroy();
   res.redirect('/login');
@@ -238,8 +245,8 @@ app.use((req, res, next) => {
   requireAuth(req, res, next);
 });
 
-// Routes
-app.get('/', (req, res) => {
+// Main app route - only accessible after login
+app.get('/app', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
@@ -257,46 +264,36 @@ app.get('/', (req, res) => {
         .header {
           display: flex;
           align-items: center;
-          justify-content: space-between;
           margin-bottom: 30px;
-        }
-        .logo-title {
-          display: flex;
-          align-items: center;
         }
         .logo {
           font-size: 24px;
           font-weight: bold;
-          color: #ff0000;
+          color: #ff0000; /* Red accent */
           margin-right: 15px;
           padding: 10px;
-          border: 2px solid #ffffff;
+          border: 2px solid #ffffff; /* White border */
           border-radius: 8px;
         }
         h1 {
-          color: #ff0000;
+          color: #ff0000; /* Red accent */
           margin: 0;
-        }
-        .user-actions {
-          display: flex;
-          align-items: center;
-          gap: 15px;
         }
         h2 {
           color: #ffffff;
-          border-bottom: 2px solid #ff0000;
+          border-bottom: 2px solid #ff0000; /* Red accent */
           padding-bottom: 8px;
         }
         .card {
-          border: 1px solid #ffffff;
+          border: 1px solid #ffffff; /* White border */
           border-radius: 8px;
           padding: 20px;
           margin-bottom: 20px;
           box-shadow: 0 3px 6px rgba(255,255,255,0.2);
-          background-color: #121212;
+          background-color: #121212; /* Dark card background */
         }
         .btn {
-          background-color: #ff0000;
+          background-color: #ff0000; /* Red accent */
           color: white;
           padding: 12px 20px;
           border: none;
@@ -308,7 +305,7 @@ app.get('/', (req, res) => {
           transition: background-color 0.3s;
         }
         .btn:hover {
-          background-color: #cc0000;
+          background-color: #cc0000; /* Darker red on hover */
         }
         .search-form {
           margin-bottom: 20px;
@@ -318,7 +315,7 @@ app.get('/', (req, res) => {
         input[type="text"] {
           padding: 12px;
           flex-grow: 1;
-          border: 1px solid #ffffff;
+          border: 1px solid #ffffff; /* White border */
           border-radius: 6px;
           font-size: 16px;
           transition: border-color 0.3s;
@@ -326,7 +323,7 @@ app.get('/', (req, res) => {
           color: #ffffff;
         }
         input[type="text"]:focus {
-          border-color: #ff0000;
+          border-color: #ff0000; /* Red accent */
           outline: none;
         }
         .footer {
@@ -335,17 +332,40 @@ app.get('/', (req, res) => {
           color: #999999;
           font-size: 14px;
         }
+        #response-container {
+          display: none;
+          margin-top: 20px;
+        }
+        
+        .loading {
+          text-align: center;
+          padding: 20px;
+          font-style: italic;
+          color: #999999;
+        }
+        
+        .error-message {
+          color: #ff0000;
+          background-color: rgba(255, 0, 0, 0.1);
+          padding: 10px;
+          border-radius: 4px;
+          margin-bottom: 15px;
+        }
       </style>
+      <script>
+        // Check login status when the page loads
+        window.addEventListener('DOMContentLoaded', function() {
+          const isAuthenticated = sessionStorage.getItem('isAuthenticated');
+          if (!isAuthenticated) {
+            window.location.href = '/login';
+          }
+        });
+      </script>
     </head>
     <body>
       <div class="header">
-        <div class="logo-title">
-          <div class="logo">CF</div>
-          <h1>JIRA Guru Assistant</h1>
-        </div>
-        <div class="user-actions">
-          <a href="/logout" class="btn">Logout</a>
-        </div>
+        <div class="logo">CF</div>
+        <h1>JIRA Guru Assistant</h1>
       </div>
       
       <div class="card">
@@ -355,273 +375,91 @@ app.get('/', (req, res) => {
       
       <div class="card">
         <h2>Ask a Question</h2>
-        <form action="/ask-question" method="post" class="search-form">
-          <input type="text" name="question" placeholder="e.g., How have we historically dealt with failed deployments in QA?" required>
+        <form id="question-form" class="search-form">
+          <input type="text" name="question" id="question-input" placeholder="e.g., How have we historically dealt with failed deployments in QA?" required>
           <button type="submit" class="btn">Ask</button>
         </form>
+        
+        <div id="response-container">
+          <div class="loading" id="loading-indicator">Analyzing your question...</div>
+          <div id="analysis-result"></div>
+        </div>
       </div>
       
       <div class="footer">
         © ${new Date().getFullYear()} Channel Factory | Powered by JIRA Guru
       </div>
+      
+      <script>
+        document.getElementById('question-form').addEventListener('submit', async function(e) {
+          e.preventDefault();
+          
+          const questionInput = document.getElementById('question-input');
+          const responseContainer = document.getElementById('response-container');
+          const loadingIndicator = document.getElementById('loading-indicator');
+          const analysisResult = document.getElementById('analysis-result');
+          
+          // Show loading state
+          responseContainer.style.display = 'block';
+          loadingIndicator.style.display = 'block';
+          analysisResult.style.display = 'none';
+          
+          try {
+            const response = await fetch('/ask-question', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                question: questionInput.value
+              })
+            });
+            
+            if (!response.ok) {
+              throw new Error('Failed to get response');
+            }
+            
+            const result = await response.json();
+            
+            // Hide loading and show result
+            loadingIndicator.style.display = 'none';
+            analysisResult.style.display = 'block';
+            analysisResult.innerHTML = result.analysis;
+            
+          } catch (error) {
+            console.error('Error:', error);
+            loadingIndicator.style.display = 'none';
+            analysisResult.style.display = 'block';
+            analysisResult.innerHTML = '<div class="error-message">Sorry, there was an error analyzing your question. Please try again later.</div>';
+          }
+        });
+      </script>
     </body>
     </html>
   `);
 });
 
-// Handle questions
+// Modify the ask-question endpoint to return JSON
 app.post('/ask-question', async (req, res) => {
   try {
     const { question } = req.body;
-    console.log(`Received question: "${question}"`);
-    
-    // Generate a unique ID for this question/response
-    const responseId = `response-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+    console.log('Received question: "' + question + '"');
     
     // Get analysis from OpenAI
     const analysis = await getResponseFromOpenAI(question);
     
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>CF JIRA Guru Analysis</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #000000;
-            color: #ffffff;
-          }
-          .header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 30px;
-          }
-          .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: #ff0000; /* Red accent */
-            margin-right: 15px;
-            padding: 10px;
-            border: 2px solid #ffffff; /* White border */
-            border-radius: 8px;
-          }
-          h1 {
-            color: #ff0000; /* Red accent */
-            margin: 0;
-          }
-          h2 {
-            color: #ffffff;
-            border-bottom: 2px solid #ff0000; /* Red accent */
-            padding-bottom: 8px;
-          }
-          .card {
-            border: 1px solid #ffffff; /* White border */
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 3px 6px rgba(255,255,255,0.2);
-            background-color: #121212; /* Dark card background */
-          }
-          .btn {
-            background-color: #ff0000; /* Red accent */
-            color: white;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            font-weight: bold;
-            transition: background-color 0.3s;
-            margin-right: 10px;
-          }
-          .btn:hover {
-            background-color: #cc0000; /* Darker red on hover */
-          }
-          .btn-neutral {
-            background-color: #333333;
-          }
-          .btn-neutral:hover {
-            background-color: #444444;
-          }
-          pre {
-            background-color: #333333;
-            padding: 15px;
-            border-radius: 6px;
-            overflow-x: auto;
-            white-space: pre-wrap;
-          }
-          .feedback-container {
-            display: flex;
-            margin-top: 20px;
-          }
-          .footer {
-            margin-top: 40px;
-            text-align: center;
-            color: #999999;
-            font-size: 14px;
-          }
-          .question {
-            font-style: italic;
-            margin-bottom: 20px;
-            padding: 10px;
-            background-color: #333333;
-            border-radius: 6px;
-          }
-          .script {
-            display: none;
-          }
-        </style>
-        <script>
-          // Check login status when the page loads
-          window.addEventListener('DOMContentLoaded', function() {
-            const isAuthenticated = sessionStorage.getItem('isAuthenticated');
-            if (!isAuthenticated) {
-              window.location.href = '/login';
-            }
-          });
-        </script>
-      </head>
-      <body>
-        <div class="header">
-          <div class="logo">CF</div>
-          <h1>JIRA Guru Analysis</h1>
-        </div>
-        
-        <div class="card">
-          <h2>Your Question</h2>
-          <div class="question">${question}</div>
-          
-          <h2>Analysis</h2>
-          <div id="analysis">${analysis}</div>
-          
-          <div class="feedback-container">
-            <a href="/" class="btn">Ask Another Question</a>
-            <a href="#" id="feedbackBtn" class="btn btn-neutral">Provide Feedback</a>
-          </div>
-        </div>
-        
-        <div class="footer">
-          © ${new Date().getFullYear()} Channel Factory | Powered by JIRA Guru
-        </div>
-        
-        <script>
-          document.getElementById('feedbackBtn').addEventListener('click', function(e) {
-            e.preventDefault();
-            const feedback = prompt('Please provide your feedback on this response:');
-            if (feedback) {
-              // Send feedback to server
-              fetch('/feedback', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  responseId: '${responseId}',
-                  question: '${question.replace(/'/g, "\\'")}',
-                  feedback: feedback
-                }),
-              })
-              .then(response => response.json())
-              .then(data => {
-                alert('Feedback submitted. Thank you!');
-              })
-              .catch((error) => {
-                console.error('Error submitting feedback:', error);
-                alert('Error submitting feedback. Please try again.');
-              });
-            }
-          });
-        </script>
-      </body>
-      </html>
-    `);
+    // Return JSON response
+    res.json({
+      success: true,
+      analysis: analysis
+    });
+    
   } catch (error) {
-    logMessage('ERROR', "Error processing question", error);
-    res.status(500).send(`
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>CF JIRA Guru - Error</title>
-        <style>
-          body {
-            font-family: Arial, sans-serif;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-            background-color: #000000;
-            color: #ffffff;
-          }
-          .header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 30px;
-          }
-          .logo {
-            font-size: 24px;
-            font-weight: bold;
-            color: #ff0000;
-            margin-right: 15px;
-            padding: 10px;
-            border: 2px solid #ffffff;
-            border-radius: 8px;
-          }
-          h1 {
-            color: #ff0000;
-            margin: 0;
-          }
-          .card {
-            border: 1px solid #ffffff;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 3px 6px rgba(255,255,255,0.2);
-            background-color: #121212;
-          }
-          .btn {
-            background-color: #ff0000;
-            color: white;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            font-weight: bold;
-          }
-          .btn:hover {
-            background-color: #cc0000;
-          }
-        </style>
-        <script>
-          // Check login status when the page loads
-          window.addEventListener('DOMContentLoaded', function() {
-            const isAuthenticated = sessionStorage.getItem('isAuthenticated');
-            if (!isAuthenticated) {
-              window.location.href = '/login';
-            }
-          });
-        </script>
-      </head>
-      <body>
-        <div class="header">
-          <div class="logo">CF</div>
-          <h1>JIRA Guru Error</h1>
-        </div>
-        
-        <div class="card">
-          <h2>Error Processing Your Question</h2>
-          <p>We apologize, but we encountered an error while processing your question.</p>
-          <p>Please try again or rephrase your question.</p>
-          <a href="/" class="btn">Back to Home</a>
-        </div>
-      </body>
-      </html>
-    `);
+    console.error('Error analyzing question:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to analyze question'
+    });
   }
 });
 
